@@ -105,10 +105,15 @@ qa_prompt = ChatPromptTemplate.from_messages([
 # =========================
 # Chains
 # =========================
-from langchain.chains import (
-    create_history_aware_retriever,
-    create_retrieval_chain,
+
+from langchain.chains.history_aware_retriever import (
+    create_history_aware_retriever
 )
+
+from langchain.chains.retrieval import (
+    create_retrieval_chain
+)
+
 from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # =========================
