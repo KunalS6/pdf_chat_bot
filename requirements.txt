@@ -1,7 +1,7 @@
 streamlit
 python-dotenv
 
-langchain
+langchain==0.1.2
 langchain-community
 langchain-core
 langchain-chroma
