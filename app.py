@@ -109,12 +109,13 @@ qa_prompt = ChatPromptTemplate.from_messages([
 # =========================
 try:
     # New LangChain versions
-    from langchain.chains.history_aware_retriever import (create_history_aware_retriever)
+    from langchain.chains.history_aware_retriever import create_history_aware_retriever
     from langchain.chains.retrieval import create_retrieval_chain
 
 except ImportError:
     # Older LangChain versions
-    from langchain.chains import (create_history_aware_retriever,create_retrieval_chain)
+    from langchain.chains import create_history_aware_retriever
+    from langchain.chains import create_retrieval_chain
 
 
 
