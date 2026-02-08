@@ -41,18 +41,17 @@ llm = ChatGroq(
 )
 
 # =========================
-# Embeddings (CPU SAFE)
+# Embeddings (Streamlit Cloud SAFE)
 # =========================
-from sentence_transformers import SentenceTransformer
 from langchain_huggingface import HuggingFaceEmbeddings
 
 @st.cache_resource(show_spinner=False)
 def load_embedding():
-    model = SentenceTransformer(
-        "sentence-transformers/all-MiniLM-L6-v2",
-        device="cpu"
+    return HuggingFaceEmbeddings(
+        model_name="sentence-transformers/all-MiniLM-L6-v2",
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
     )
-    return HuggingFaceEmbeddings(client=model)
 
 embedding = load_embedding()
 
