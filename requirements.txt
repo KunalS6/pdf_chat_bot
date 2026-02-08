@@ -1,18 +1,20 @@
 streamlit>=1.35
 python-dotenv
 
-# LangChain (modern modular stack)
-langchain-core>=0.3.56
-langchain-community>=0.3.0
-langchain-chroma>=1.0.0
+# LangChain (modern + compatibility wrapper)
+langchain-classic>=1.0.0
+langchain-core>=1.2.0
+langchain-community>=0.4.0
+langchain-chroma>=1.1.0
 langchain-groq>=1.1.0
 langchain-huggingface>=1.2.0
+langchain-text-splitters>=1.1.0
 
 # Vector DB
-chromadb>=0.5.0
+chromadb>=1.4.0
 
 # Embeddings
-sentence-transformers>=2.6.0
+sentence-transformers>=5.0.0
 
 # PDF
-pypdf>=4.0.0
+pypdf>=6.0.0
