@@ -16,13 +16,11 @@ import re
 import csv
 import io
 import atexit
-#from dotenv import load_dotenv
 
 # =========================
 # Environment setup
 # =========================
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
-#load_dotenv()
 
 groq_api_key = os.getenv("GROQ_API_KEY")
 if not groq_api_key:
@@ -41,17 +39,28 @@ llm = ChatGroq(
 )
 
 # =========================
-# Embeddings (Streamlit Cloud SAFE)
+# Embeddings (Streamlit Cloud SAFE, no langchain_huggingface)
 # =========================
-from langchain_huggingface import HuggingFaceEmbeddings
+from sentence_transformers import SentenceTransformer
+from langchain_core.embeddings import Embeddings
+from typing import List
+
+class STEmbeddings(Embeddings):
+    def __init__(self):
+        self.model = SentenceTransformer(
+            "sentence-transformers/all-MiniLM-L6-v2",
+            device="cpu",
+        )
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self.model.encode(texts, show_progress_bar=False).tolist()
+
+    def embed_query(self, text: str) -> List[float]:
+        return self.model.encode([text], show_progress_bar=False)[0].tolist()
 
 @st.cache_resource(show_spinner=False)
 def load_embedding():
-    return HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2",
-        model_kwargs={"device": "cpu"},
-        encode_kwargs={"normalize_embeddings": True},
-    )
+    return STEmbeddings()
 
 embedding = load_embedding()
 
@@ -96,29 +105,20 @@ qa_prompt = ChatPromptTemplate.from_messages([
     ("system",
      "Answer ONLY using the CONTEXT below.\n\n{context}\n\n"
      "Rules:\n"
-     "- Use only the provided context\n"
-     "- If the answer is not in context, say you don't know"),
+     "- Use only the provided context.\n"
+     "- If the answer is not in context, say you don't know based on the uploaded PDF."),
     MessagesPlaceholder("chat_history"),
     ("human", "{input}")
 ])
 
-
-
 # =========================
-# LangChain chains (Streamlit-safe)
+# LangChain chains
 # =========================
-
-
-try:
-    # New LangChain versions
-    from langchain.chains.history_aware_retriever import create_history_aware_retriever
-    from langchain.chains.retrieval import create_retrieval_chain
-
-except ImportError:
-    # Older LangChain versions
-    from langchain.chains import create_history_aware_retriever
-    from langchain.chains import create_retrieval_chain
-
+from langchain.chains import (
+    create_history_aware_retriever,
+    create_retrieval_chain,
+)
+from langchain.chains.combine_documents import create_stuff_documents_chain
 
 # =========================
 # Chat memory
