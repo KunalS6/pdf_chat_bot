@@ -39,28 +39,40 @@ llm = ChatGroq(
 )
 
 # =========================
-# Embeddings (Streamlit Cloud SAFE, no langchain_huggingface)
+# Embeddings (no sentence-transformers)
 # =========================
-from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer, AutoModel
+import torch
 from langchain_core.embeddings import Embeddings
 from typing import List
 
-class STEmbeddings(Embeddings):
-    def __init__(self):
-        self.model = SentenceTransformer(
-            "sentence-transformers/all-MiniLM-L6-v2",
-            device="cpu",
-        )
+class HFEmbeddings(Embeddings):
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name)
+
+    def _encode(self, texts: List[str]) -> List[List[float]]:
+        # Simple mean pooling
+        with torch.no_grad():
+            encoded = self.tokenizer(
+                texts,
+                padding=True,
+                truncation=True,
+                return_tensors="pt",
+            )
+            outputs = self.model(**encoded)
+            embeddings = outputs.last_hidden_state.mean(dim=1)
+        return embeddings.cpu().tolist()
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return self.model.encode(texts, show_progress_bar=False).tolist()
+        return self._encode(texts)
 
     def embed_query(self, text: str) -> List[float]:
-        return self.model.encode([text], show_progress_bar=False)[0].tolist()
+        return self._encode([text])[0]
 
 @st.cache_resource(show_spinner=False)
 def load_embedding():
-    return STEmbeddings()
+    return HFEmbeddings()
 
 embedding = load_embedding()
 
@@ -105,8 +117,8 @@ qa_prompt = ChatPromptTemplate.from_messages([
     ("system",
      "Answer ONLY using the CONTEXT below.\n\n{context}\n\n"
      "Rules:\n"
-     "- Use only the provided context.\n"
-     "- If the answer is not in context, say you don't know based on the uploaded PDF."),
+     "- Use only the provided context\n"
+     "- If the answer is not in context, say you don't know"),
     MessagesPlaceholder("chat_history"),
     ("human", "{input}")
 ])
