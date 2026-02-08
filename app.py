@@ -106,8 +106,19 @@ qa_prompt = ChatPromptTemplate.from_messages([
 # Chains
 # =========================
 
-from langchain.chains.history_aware_retriever import create_history_aware_retriever
+try:
+    # Newer LangChain versions
+    from langchain.chains.history_aware_retriever import (
+        create_history_aware_retriever
+    )
+    from langchain.chains.retrieval import create_retrieval_chain
 
+except ImportError:
+    # Older LangChain fallback (Streamlit Cloud safe)
+    from langchain.chains import (
+        create_history_aware_retriever,
+        create_retrieval_chain,
+    )
 
 from langchain.chains.retrieval import create_retrieval_chain
 
