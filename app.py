@@ -140,4 +140,147 @@ if "rag_chain" not in st.session_state:
 if "collection_name" not in st.session_state:
     st.session_state.collection_name = None
 
-if "pdf_path" not in st.ses
+if "pdf_path" not in st.session_state:
+    st.session_state.pdf_path = None
+
+if "chat_log" not in st.session_state:
+    st.session_state.chat_log = []
+
+# =========================
+# Auto cleanup on app close
+# =========================
+def cleanup():
+    if st.session_state.pdf_path and os.path.exists(st.session_state.pdf_path):
+        try:
+            os.remove(st.session_state.pdf_path)
+        except:
+            pass
+
+    if st.session_state.collection_name:
+        try:
+            chroma.delete_collection(st.session_state.collection_name)
+        except:
+            pass
+
+atexit.register(cleanup)
+
+# =========================
+# Sidebar
+# =========================
+with st.sidebar:
+    st.subheader("Session controls")
+
+    # 🔽 Download chat CSV
+    if st.session_state.chat_log:
+        buffer = io.StringIO()
+        writer = csv.DictWriter(buffer, fieldnames=["question", "answer"])
+        writer.writeheader()
+        writer.writerows(st.session_state.chat_log)
+
+        st.download_button(
+            "⬇️ Download chat (CSV)",
+            buffer.getvalue(),
+            "chat_history.csv",
+            "text/csv",
+        )
+
+    # 🗑️ Delete current PDF
+    if st.button("🗑️ Delete current PDF"):
+        store.pop(st.session_state.session_id, None)
+        st.session_state.chat_log.clear()
+
+        if st.session_state.collection_name:
+            chroma.delete_collection(st.session_state.collection_name)
+
+        if st.session_state.pdf_path and os.path.exists(st.session_state.pdf_path):
+            os.remove(st.session_state.pdf_path)
+
+        st.session_state.rag_chain = None
+        st.session_state.collection_name = None
+        st.session_state.pdf_path = None
+
+        st.success("PDF & chat cleared")
+
+# =========================
+# Upload PDF
+# =========================
+uploaded = st.file_uploader("📤 Upload a PDF", type=["pdf"])
+
+if uploaded and not st.session_state.rag_chain:
+    with st.spinner("Processing PDF..."):
+        name = sanitize(uploaded.name)
+        path = f"temp_{name}.pdf"
+
+        with open(path, "wb") as f:
+            f.write(uploaded.read())
+
+        st.session_state.pdf_path = path
+        st.session_state.collection_name = name
+
+        loader = PyPDFLoader(path)
+        docs = loader.load()
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1500,
+            chunk_overlap=150
+        )
+        splits = splitter.split_documents(docs)
+
+        vectorstore = Chroma.from_documents(
+            documents=splits,
+            embedding=embedding,
+            collection_name=name,
+            client=chroma
+        )
+
+        retriever = vectorstore.as_retriever(k=4)
+
+        history_retriever = create_history_aware_retriever(
+            llm, retriever, contextualize_q_prompt
+        )
+
+        qa_chain = create_stuff_documents_chain(llm, qa_prompt)
+
+        rag_chain = create_retrieval_chain(
+            history_retriever, qa_chain
+        )
+
+        st.session_state.rag_chain = RunnableWithMessageHistory(
+            rag_chain,
+            get_session_history,
+            input_messages_key="input",
+            history_messages_key="chat_history",
+            output_messages_key="answer",
+        )
+
+    st.success("✅ PDF processed. Start chatting!")
+
+# =========================
+# Chat UI
+# =========================
+if st.session_state.rag_chain:
+    user_input = st.chat_input("Ask a question about the PDF")
+
+    if user_input:
+        with st.chat_message("user"):
+            st.write(user_input)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                result = st.session_state.rag_chain.invoke(
+                    {"input": user_input},
+                    config={"configurable": {
+                        "session_id": st.session_state.session_id
+                    }}
+                )
+
+                answer = result["answer"]
+                st.write(answer)
+
+                # Save chat
+                st.session_state.chat_log.append({
+                    "question": user_input,
+                    "answer": answer
+                })
+else:
+    st.info("⬆️ Upload a PDF to begin")
