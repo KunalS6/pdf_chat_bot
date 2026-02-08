@@ -107,6 +107,7 @@ qa_prompt = ChatPromptTemplate.from_messages([
 # =========================
 # LangChain chains (Streamlit-safe)
 # =========================
+'''
 try:
     # New LangChain versions
     from langchain.chains.history_aware_retriever import create_history_aware_retriever
@@ -117,8 +118,11 @@ except ImportError:
     from langchain.chains import create_history_aware_retriever
     from langchain.chains import create_retrieval_chain
 
+    
+'''
 
-
+from langchain.chains import create_history_aware_retriever
+from langchain.chains import create_retrieval_chain
 
 
 
