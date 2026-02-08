@@ -16,13 +16,13 @@ import re
 import csv
 import io
 import atexit
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 
 # =========================
 # Environment setup
 # =========================
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
-load_dotenv()
+#load_dotenv()
 
 groq_api_key = os.getenv("GROQ_API_KEY")
 if not groq_api_key:
