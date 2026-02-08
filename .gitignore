@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+chroma_store/
+
+# Env
+.env
+
+# Runtime files
+temp_*.pdf
+chroma_store/
+
+# OS
+.DS_Store

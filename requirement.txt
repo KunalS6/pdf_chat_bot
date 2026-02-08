@@ -1,0 +1,17 @@
+streamlit>=1.31
+python-dotenv
+
+langchain>=0.2.0
+langchain-core
+langchain-community
+langchain-chroma
+langchain-groq
+langchain-huggingface
+
+chromadb>=0.4.24
+
+sentence-transformers
+pypdf
+
+torch
+transformers
