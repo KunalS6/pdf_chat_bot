@@ -27,6 +27,12 @@ if not groq_api_key:
     st.error("❌ GROQ_API_KEY not found in environment")
     st.stop()
 
+# Embedding provider key (OpenAI-style API)
+openai_api_key = os.getenv("OPENAI_API_KEY")
+if not openai_api_key:
+    st.error("❌ OPENAI_API_KEY not found in environment (needed for embeddings)")
+    st.stop()
+
 # =========================
 # LLM (Groq)
 # =========================
@@ -39,40 +45,17 @@ llm = ChatGroq(
 )
 
 # =========================
-# Embeddings (no sentence-transformers)
+# Embeddings (hosted, no local libs)
 # =========================
-from transformers import AutoTokenizer, AutoModel
-import torch
-from langchain_core.embeddings import Embeddings
-from typing import List
-
-class HFEmbeddings(Embeddings):
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModel.from_pretrained(model_name)
-
-    def _encode(self, texts: List[str]) -> List[List[float]]:
-        # Simple mean pooling
-        with torch.no_grad():
-            encoded = self.tokenizer(
-                texts,
-                padding=True,
-                truncation=True,
-                return_tensors="pt",
-            )
-            outputs = self.model(**encoded)
-            embeddings = outputs.last_hidden_state.mean(dim=1)
-        return embeddings.cpu().tolist()
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return self._encode(texts)
-
-    def embed_query(self, text: str) -> List[float]:
-        return self._encode([text])[0]
+from langchain_community.embeddings import OpenAIEmbeddings
 
 @st.cache_resource(show_spinner=False)
 def load_embedding():
-    return HFEmbeddings()
+    # Change model name if you use a different OpenAI-compatible embedding model
+    return OpenAIEmbeddings(
+        model="text-embedding-3-small",
+        openai_api_key=openai_api_key,
+    )
 
 embedding = load_embedding()
 
@@ -118,7 +101,7 @@ qa_prompt = ChatPromptTemplate.from_messages([
      "Answer ONLY using the CONTEXT below.\n\n{context}\n\n"
      "Rules:\n"
      "- Use only the provided context\n"
-     "- If the answer is not in context, say you don't know"),
+     "- If the answer is not in context, say you don't know based on the uploaded PDF"),
     MessagesPlaceholder("chat_history"),
     ("human", "{input}")
 ])
@@ -157,147 +140,4 @@ if "rag_chain" not in st.session_state:
 if "collection_name" not in st.session_state:
     st.session_state.collection_name = None
 
-if "pdf_path" not in st.session_state:
-    st.session_state.pdf_path = None
-
-if "chat_log" not in st.session_state:
-    st.session_state.chat_log = []
-
-# =========================
-# Auto cleanup on app close
-# =========================
-def cleanup():
-    if st.session_state.pdf_path and os.path.exists(st.session_state.pdf_path):
-        try:
-            os.remove(st.session_state.pdf_path)
-        except:
-            pass
-
-    if st.session_state.collection_name:
-        try:
-            chroma.delete_collection(st.session_state.collection_name)
-        except:
-            pass
-
-atexit.register(cleanup)
-
-# =========================
-# Sidebar
-# =========================
-with st.sidebar:
-    st.subheader("Session controls")
-
-    # 🔽 Download chat CSV
-    if st.session_state.chat_log:
-        buffer = io.StringIO()
-        writer = csv.DictWriter(buffer, fieldnames=["question", "answer"])
-        writer.writeheader()
-        writer.writerows(st.session_state.chat_log)
-
-        st.download_button(
-            "⬇️ Download chat (CSV)",
-            buffer.getvalue(),
-            "chat_history.csv",
-            "text/csv",
-        )
-
-    # 🗑️ Delete current PDF
-    if st.button("🗑️ Delete current PDF"):
-        store.pop(st.session_state.session_id, None)
-        st.session_state.chat_log.clear()
-
-        if st.session_state.collection_name:
-            chroma.delete_collection(st.session_state.collection_name)
-
-        if st.session_state.pdf_path and os.path.exists(st.session_state.pdf_path):
-            os.remove(st.session_state.pdf_path)
-
-        st.session_state.rag_chain = None
-        st.session_state.collection_name = None
-        st.session_state.pdf_path = None
-
-        st.success("PDF & chat cleared")
-
-# =========================
-# Upload PDF
-# =========================
-uploaded = st.file_uploader("📤 Upload a PDF", type=["pdf"])
-
-if uploaded and not st.session_state.rag_chain:
-    with st.spinner("Processing PDF..."):
-        name = sanitize(uploaded.name)
-        path = f"temp_{name}.pdf"
-
-        with open(path, "wb") as f:
-            f.write(uploaded.read())
-
-        st.session_state.pdf_path = path
-        st.session_state.collection_name = name
-
-        loader = PyPDFLoader(path)
-        docs = loader.load()
-
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1500,
-            chunk_overlap=150
-        )
-        splits = splitter.split_documents(docs)
-
-        vectorstore = Chroma.from_documents(
-            documents=splits,
-            embedding=embedding,
-            collection_name=name,
-            client=chroma
-        )
-
-        retriever = vectorstore.as_retriever(k=4)
-
-        history_retriever = create_history_aware_retriever(
-            llm, retriever, contextualize_q_prompt
-        )
-
-        qa_chain = create_stuff_documents_chain(llm, qa_prompt)
-
-        rag_chain = create_retrieval_chain(
-            history_retriever, qa_chain
-        )
-
-        st.session_state.rag_chain = RunnableWithMessageHistory(
-            rag_chain,
-            get_session_history,
-            input_messages_key="input",
-            history_messages_key="chat_history",
-            output_messages_key="answer",
-        )
-
-    st.success("✅ PDF processed. Start chatting!")
-
-# =========================
-# Chat UI
-# =========================
-if st.session_state.rag_chain:
-    user_input = st.chat_input("Ask a question about the PDF")
-
-    if user_input:
-        with st.chat_message("user"):
-            st.write(user_input)
-
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                result = st.session_state.rag_chain.invoke(
-                    {"input": user_input},
-                    config={"configurable": {
-                        "session_id": st.session_state.session_id
-                    }}
-                )
-
-                answer = result["answer"]
-                st.write(answer)
-
-                # Save chat
-                st.session_state.chat_log.append({
-                    "question": user_input,
-                    "answer": answer
-                })
-else:
-    st.info("⬆️ Upload a PDF to begin")
+if "pdf_path" not in st.ses
