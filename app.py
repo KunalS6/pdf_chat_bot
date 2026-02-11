@@ -27,13 +27,6 @@ if not groq_api_key:
     st.error("❌ GROQ_API_KEY not found in environment")
     st.stop()
 
-# Groq OpenAI-compatible base URL (set this in Streamlit secrets/env)
-# Example placeholder; replace with the actual Groq OpenAI-compatible endpoint
-groq_api_base = os.getenv("GROQ_API_BASE")
-if not groq_api_base:
-    st.error("❌ GROQ_API_BASE not found in environment (OpenAI-compatible Groq endpoint)")
-    st.stop()
-
 # =========================
 # LLM (Groq)
 # =========================
@@ -45,18 +38,42 @@ llm = ChatGroq(
     temperature=0.2,
 )
 
+# =========================
+# Embeddings (local via transformers, no sentence-transformers, no OpenAI)
+# =========================
+from transformers import AutoTokenizer, AutoModel
+import torch
+from typing import List
+from langchain_core.embeddings import Embeddings
 
-# =========================
-# Embeddings (Groq native)
-# =========================
-from langchain_groq import GroqEmbeddings  # NEW
+class HFEmbeddings(Embeddings):
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        # This model is small and widely available; transformers will download it once
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name)
+
+    def _encode(self, texts: List[str]) -> List[List[float]]:
+        # Simple mean pooling
+        with torch.no_grad():
+            enc = self.tokenizer(
+                texts,
+                padding=True,
+                truncation=True,
+                return_tensors="pt",
+            )
+            out = self.model(**enc)
+            embeddings = out.last_hidden_state.mean(dim=1)
+        return embeddings.cpu().tolist()
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self._encode(texts)
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._encode([text])[0]
 
 @st.cache_resource(show_spinner=False)
 def load_embedding():
-    return GroqEmbeddings(
-        model="text-embedding-3-small",  # or the Groq embedding model name from docs
-        groq_api_key=groq_api_key,
-    )
+    return HFEmbeddings()
 
 embedding = load_embedding()
 
