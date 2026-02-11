@@ -270,8 +270,9 @@ if uploaded and not st.session_state.rag_chain:
             result = llm.invoke(messages)
             standalone = result.content if hasattr(result, "content") else str(result)
 
-            # 2) Retrieve docs
-            docs = vectorstore.as_retriever(k=4).get_relevant_documents(standalone)
+            # 2) Retrieve docs using retriever.invoke
+            retriever = vectorstore.as_retriever(k=4)
+            docs = retriever.invoke(standalone)
 
             # 3) Build context and answer
             context = "\n\n".join(d.page_content for d in docs)
