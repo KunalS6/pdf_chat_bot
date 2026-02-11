@@ -1,3 +1,4 @@
+'''
 # =========================
 # Streamlit UI
 # =========================
@@ -324,3 +325,19 @@ if st.session_state.rag_chain:
                 })
 else:
     st.info("⬆️ Upload a PDF to begin")
+
+'''
+
+
+
+from groq import Groq
+
+client = Groq(api_key="gsk_your_real_groq_key_here")
+
+resp = client.chat.completions.create(
+    model="llama-3.1-8b-instant",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(resp.choices[0].message.content)
+
+
