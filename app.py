@@ -27,12 +27,6 @@ if not groq_api_key:
     st.error("❌ GROQ_API_KEY not found in environment")
     st.stop()
 
-# Embedding provider key (OpenAI-style API)
-openai_api_key = os.getenv("OPENAI_API_KEY")
-if not openai_api_key:
-    st.error("❌ OPENAI_API_KEY not found in environment (needed for embeddings)")
-    st.stop()
-
 # =========================
 # LLM (Groq)
 # =========================
@@ -45,17 +39,25 @@ llm = ChatGroq(
 )
 
 # =========================
-# Embeddings (hosted, no local libs)
+# Embeddings (local, CPU, no OpenAI)
 # =========================
-from langchain_community.embeddings import OpenAIEmbeddings
+from sentence_transformers import SentenceTransformer
+from langchain_core.embeddings import Embeddings
+from typing import List
+
+class STEmbeddings(Embeddings):
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        self.model = SentenceTransformer(model_name, device="cpu")
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self.model.encode(texts, show_progress_bar=False).tolist()
+
+    def embed_query(self, text: str) -> List[float]:
+        return self.model.encode([text], show_progress_bar=False)[0].tolist()
 
 @st.cache_resource(show_spinner=False)
 def load_embedding():
-    # Change model name if you use a different OpenAI-compatible embedding model
-    return OpenAIEmbeddings(
-        model="text-embedding-3-small",
-        openai_api_key=openai_api_key,
-    )
+    return STEmbeddings()
 
 embedding = load_embedding()
 
