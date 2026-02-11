@@ -45,18 +45,17 @@ llm = ChatGroq(
     temperature=0.2,
 )
 
+
 # =========================
-# Embeddings (Groq via OpenAI-compatible API)
+# Embeddings (Groq native)
 # =========================
-from langchain_community.embeddings import OpenAIEmbeddings
+from langchain_groq import GroqEmbeddings  # NEW
 
 @st.cache_resource(show_spinner=False)
 def load_embedding():
-    # Point OpenAIEmbeddings to Groq’s OpenAI-compatible endpoint
-    return OpenAIEmbeddings(
-        model="text-embedding-3-small",     # or a Groq-supported embedding model name
-        openai_api_key=groq_api_key,        # reusing GROQ_API_KEY
-        openai_api_base=groq_api_base,      # Groq OpenAI-compatible base URL
+    return GroqEmbeddings(
+        model="text-embedding-3-small",  # or the Groq embedding model name from docs
+        groq_api_key=groq_api_key,
     )
 
 embedding = load_embedding()
