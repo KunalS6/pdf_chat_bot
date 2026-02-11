@@ -39,7 +39,7 @@ llm = ChatGroq(
 )
 
 # =========================
-# Embeddings (local via transformers, no sentence-transformers, no OpenAI)
+# Embeddings (local via transformers)
 # =========================
 from transformers import AutoTokenizer, AutoModel
 import torch
@@ -48,12 +48,10 @@ from langchain_core.embeddings import Embeddings
 
 class HFEmbeddings(Embeddings):
     def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        # This model is small and widely available; transformers will download it once
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name)
 
     def _encode(self, texts: List[str]) -> List[List[float]]:
-        # Simple mean pooling
         with torch.no_grad():
             enc = self.tokenizer(
                 texts,
@@ -125,12 +123,10 @@ qa_prompt = ChatPromptTemplate.from_messages([
 ])
 
 # =========================
-# LangChain chains
+# Runnables (manual RAG wiring)
 # =========================
-from langchain.chains.history_aware_retriever import create_history_aware_retriever
-from langchain.chains.retrieval import create_retrieval_chain
+from langchain_core.runnables import RunnableParallel, RunnableLambda
 from langchain.chains.combine_documents import create_stuff_documents_chain
-
 
 # =========================
 # Chat memory
@@ -252,14 +248,29 @@ if uploaded and not st.session_state.rag_chain:
 
         retriever = vectorstore.as_retriever(k=4)
 
-        history_retriever = create_history_aware_retriever(
-            llm, retriever, contextualize_q_prompt
-        )
+        # ---- Manual RAG chain (no langchain.chains) ----
+
+        def contextualize(inputs: dict) -> dict:
+            messages = contextualize_q_prompt.format_messages(
+                chat_history=inputs.get("chat_history", []),
+                input=inputs["input"],
+            )
+            result = llm.invoke(messages)
+            standalone = result.content if hasattr(result, "content") else str(result)
+            return {"input": standalone, "chat_history": inputs.get("chat_history", [])}
+
+        contextualize_chain = RunnableLambda(contextualize)
 
         qa_chain = create_stuff_documents_chain(llm, qa_prompt)
 
-        rag_chain = create_retrieval_chain(
-            history_retriever, qa_chain
+        rag_chain = (
+            contextualize_chain
+            | RunnableParallel(
+                context=lambda x: retriever.get_relevant_documents(x["input"]),
+                input=lambda x: x["input"],
+                chat_history=lambda x: x.get("chat_history", []),
+            )
+            | qa_chain
         )
 
         st.session_state.rag_chain = RunnableWithMessageHistory(
