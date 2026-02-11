@@ -123,10 +123,10 @@ qa_prompt = ChatPromptTemplate.from_messages([
 ])
 
 # =========================
-# Runnables (manual RAG wiring)
+# Runnables / combine chain
 # =========================
 from langchain_core.runnables import RunnableParallel, RunnableLambda
-from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain_community.chains.combine_documents import create_stuff_documents_chain
 
 # =========================
 # Chat memory
