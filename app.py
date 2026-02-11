@@ -123,10 +123,27 @@ qa_prompt = ChatPromptTemplate.from_messages([
 ])
 
 # =========================
-# Runnables / combine chain
+# Runnables / manual RAG
 # =========================
 from langchain_core.runnables import RunnableParallel, RunnableLambda
-from langchain_community.chains.combine_documents import create_stuff_documents_chain
+from langchain_core.documents import Document
+
+def docs_to_context(docs: List[Document]) -> str:
+    """Join retrieved docs into a single context string."""
+    return "\n\n".join(d.page_content for d in docs)
+
+def qa_with_context(inputs: dict) -> str:
+    """Take docs + question + history and call the LLM with qa_prompt."""
+    context = docs_to_context(inputs["context"])
+    messages = qa_prompt.format_messages(
+        context=context,
+        chat_history=inputs.get("chat_history", []),
+        input=inputs["input"],
+    )
+    res = llm.invoke(messages)
+    return res.content if hasattr(res, "content") else str(res)
+
+qa_chain = RunnableLambda(qa_with_context)
 
 # =========================
 # Chat memory
@@ -183,7 +200,6 @@ atexit.register(cleanup)
 with st.sidebar:
     st.subheader("Session controls")
 
-    # 🔽 Download chat CSV
     if st.session_state.chat_log:
         buffer = io.StringIO()
         writer = csv.DictWriter(buffer, fieldnames=["question", "answer"])
@@ -197,7 +213,6 @@ with st.sidebar:
             "text/csv",
         )
 
-    # 🗑️ Delete current PDF
     if st.button("🗑️ Delete current PDF"):
         store.pop(st.session_state.session_id, None)
         st.session_state.chat_log.clear()
@@ -248,7 +263,7 @@ if uploaded and not st.session_state.rag_chain:
 
         retriever = vectorstore.as_retriever(k=4)
 
-        # ---- Manual RAG chain (no langchain.chains) ----
+        # -------- Manual RAG chain (no langchain.chains at all) --------
 
         def contextualize(inputs: dict) -> dict:
             messages = contextualize_q_prompt.format_messages(
@@ -260,8 +275,6 @@ if uploaded and not st.session_state.rag_chain:
             return {"input": standalone, "chat_history": inputs.get("chat_history", [])}
 
         contextualize_chain = RunnableLambda(contextualize)
-
-        qa_chain = create_stuff_documents_chain(llm, qa_prompt)
 
         rag_chain = (
             contextualize_chain
@@ -305,7 +318,6 @@ if st.session_state.rag_chain:
                 answer = result["answer"]
                 st.write(answer)
 
-                # Save chat
                 st.session_state.chat_log.append({
                     "question": user_input,
                     "answer": answer
