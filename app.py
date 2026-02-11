@@ -125,15 +125,13 @@ qa_prompt = ChatPromptTemplate.from_messages([
 # =========================
 # Runnables / manual RAG
 # =========================
-from langchain_core.runnables import RunnableParallel, RunnableLambda
+from langchain_core.runnables import RunnableLambda
 from langchain_core.documents import Document
 
 def docs_to_context(docs: List[Document]) -> str:
-    """Join retrieved docs into a single context string."""
     return "\n\n".join(d.page_content for d in docs)
 
 def qa_with_context(inputs: dict) -> str:
-    """Take docs + question + history and call the LLM with qa_prompt."""
     context = docs_to_context(inputs["context"])
     messages = qa_prompt.format_messages(
         context=context,
@@ -261,30 +259,31 @@ if uploaded and not st.session_state.rag_chain:
             client=chroma
         )
 
-        retriever = vectorstore.as_retriever(k=4)
+        # -------- Manual RAG chain (simple lambda) --------
 
-        # -------- Manual RAG chain (no langchain.chains at all) --------
-
-        def contextualize(inputs: dict) -> dict:
+        def rag_fn(inputs: dict) -> str:
+            # 1) Contextualize question
             messages = contextualize_q_prompt.format_messages(
                 chat_history=inputs.get("chat_history", []),
                 input=inputs["input"],
             )
             result = llm.invoke(messages)
             standalone = result.content if hasattr(result, "content") else str(result)
-            return {"input": standalone, "chat_history": inputs.get("chat_history", [])}
 
-        contextualize_chain = RunnableLambda(contextualize)
+            # 2) Retrieve docs
+            docs = vectorstore.as_retriever(k=4).get_relevant_documents(standalone)
 
-        rag_chain = (
-            contextualize_chain
-            | RunnableParallel(
-                context=lambda x: retriever.get_relevant_documents(x["input"]),
-                input=lambda x: x["input"],
-                chat_history=lambda x: x.get("chat_history", []),
+            # 3) Build context and answer
+            context = "\n\n".join(d.page_content for d in docs)
+            qa_messages = qa_prompt.format_messages(
+                context=context,
+                chat_history=inputs.get("chat_history", []),
+                input=standalone,
             )
-            | qa_chain
-        )
+            qa_res = llm.invoke(qa_messages)
+            return qa_res.content if hasattr(qa_res, "content") else str(qa_res)
+
+        rag_chain = RunnableLambda(rag_fn)
 
         st.session_state.rag_chain = RunnableWithMessageHistory(
             rag_chain,
@@ -324,6 +323,3 @@ if st.session_state.rag_chain:
                 })
 else:
     st.info("⬆️ Upload a PDF to begin")
-
-
-
