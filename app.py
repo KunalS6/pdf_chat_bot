@@ -27,6 +27,13 @@ if not groq_api_key:
     st.error("❌ GROQ_API_KEY not found in environment")
     st.stop()
 
+# Groq OpenAI-compatible base URL (set this in Streamlit secrets/env)
+# Example placeholder; replace with the actual Groq OpenAI-compatible endpoint
+groq_api_base = os.getenv("GROQ_API_BASE")
+if not groq_api_base:
+    st.error("❌ GROQ_API_BASE not found in environment (OpenAI-compatible Groq endpoint)")
+    st.stop()
+
 # =========================
 # LLM (Groq)
 # =========================
@@ -39,25 +46,18 @@ llm = ChatGroq(
 )
 
 # =========================
-# Embeddings (local, CPU, no OpenAI)
+# Embeddings (Groq via OpenAI-compatible API)
 # =========================
-from sentence_transformers import SentenceTransformer
-from langchain_core.embeddings import Embeddings
-from typing import List
-
-class STEmbeddings(Embeddings):
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        self.model = SentenceTransformer(model_name, device="cpu")
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return self.model.encode(texts, show_progress_bar=False).tolist()
-
-    def embed_query(self, text: str) -> List[float]:
-        return self.model.encode([text], show_progress_bar=False)[0].tolist()
+from langchain_community.embeddings import OpenAIEmbeddings
 
 @st.cache_resource(show_spinner=False)
 def load_embedding():
-    return STEmbeddings()
+    # Point OpenAIEmbeddings to Groq’s OpenAI-compatible endpoint
+    return OpenAIEmbeddings(
+        model="text-embedding-3-small",     # or a Groq-supported embedding model name
+        openai_api_key=groq_api_key,        # reusing GROQ_API_KEY
+        openai_api_base=groq_api_base,      # Groq OpenAI-compatible base URL
+    )
 
 embedding = load_embedding()
 
