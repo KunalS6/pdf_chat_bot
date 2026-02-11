@@ -308,19 +308,19 @@ if st.session_state.rag_chain:
 
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                result = st.session_state.rag_chain.invoke(
-                    {"input": user_input},
-                    config={"configurable": {
-                        "session_id": st.session_state.session_id
-                    }}
+                answer = st.session_state.rag_chain.invoke(
+                {"input": user_input},
+                config={"configurable": {
+                    "session_id": st.session_state.session_id
+                }}
                 )
 
-                answer = result["answer"]
-                st.write(answer)
+            st.write(answer)
 
-                st.session_state.chat_log.append({
-                    "question": user_input,
-                    "answer": answer
-                })
+            st.session_state.chat_log.append({
+                "question": user_input,
+                "answer": answer
+            })
+
 else:
     st.info("⬆️ Upload a PDF to begin")
