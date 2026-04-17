@@ -5,10 +5,10 @@ import streamlit as st
 
 st.set_page_config(page_title="PDF Chatbot (RAG)", layout="wide")
 st.title("📄 Conversational PDF Chatbot")
-st.caption("Upload a PDF and ask questions with memory (answers ONLY from the PDF)")
+st.caption("Upload a PDF and ask questions (answers ONLY from the PDF)")
 
 # =========================
-# Standard imports
+# Imports
 # =========================
 import os
 import uuid
@@ -16,15 +16,17 @@ import re
 import csv
 import io
 import atexit
+from dotenv import load_dotenv
+load_dotenv()
 
 # =========================
-# Environment setup
+# ENV
 # =========================
 os.environ["ANONYMIZED_TELEMETRY"] = "False"
 
 groq_api_key = os.getenv("GROQ_API_KEY")
 if not groq_api_key:
-    st.error("❌ GROQ_API_KEY not found in environment")
+    st.error("❌ GROQ_API_KEY not found")
     st.stop()
 
 # =========================
@@ -33,13 +35,13 @@ if not groq_api_key:
 from langchain_groq import ChatGroq
 
 llm = ChatGroq(
-    model="llama-3.1-8b-instant",
+    model="llama-3.1-8b-instant",  # stable free model
     groq_api_key=groq_api_key,
     temperature=0.2,
 )
 
 # =========================
-# Embeddings (local via transformers)
+# Embeddings (LOCAL - FREE)
 # =========================
 from transformers import AutoTokenizer, AutoModel
 import torch
@@ -47,107 +49,81 @@ from typing import List
 from langchain_core.embeddings import Embeddings
 
 class HFEmbeddings(Embeddings):
-    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+    def __init__(self):
+        model_name = "sentence-transformers/all-MiniLM-L6-v2"
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name)
 
-    def _encode(self, texts: List[str]) -> List[List[float]]:
+    def _encode(self, texts: List[str]):
         with torch.no_grad():
             enc = self.tokenizer(
                 texts,
                 padding=True,
                 truncation=True,
-                return_tensors="pt",
+                return_tensors="pt"
             )
             out = self.model(**enc)
             embeddings = out.last_hidden_state.mean(dim=1)
         return embeddings.cpu().tolist()
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts):
         return self._encode(texts)
 
-    def embed_query(self, text: str) -> List[float]:
+    def embed_query(self, text):
         return self._encode([text])[0]
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource
 def load_embedding():
     return HFEmbeddings()
 
 embedding = load_embedding()
 
 # =========================
-# Chroma (persistent)
+# Chroma DB
 # =========================
 from chromadb import PersistentClient
 from langchain_chroma import Chroma
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource
 def chroma_client():
     os.makedirs("chroma_store", exist_ok=True)
     return PersistentClient(path="chroma_store")
 
 chroma = chroma_client()
 
-def sanitize(name: str) -> str:
+# =========================
+# Utils
+# =========================
+def sanitize(name: str):
     name = os.path.splitext(name)[0].lower()
     name = re.sub(r"[^a-z0-9_-]+", "_", name)
     return name[:63]
 
 # =========================
-# Loaders & splitters
+# PDF Loader
 # =========================
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # =========================
-# Prompts
+# Prompt
 # =========================
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-contextualize_q_prompt = ChatPromptTemplate.from_messages([
-    ("system",
-     "Reformulate the user question into a standalone question "
-     "using chat history. Do NOT answer."),
-    MessagesPlaceholder("chat_history"),
-    ("human", "{input}")
-])
-
 qa_prompt = ChatPromptTemplate.from_messages([
     ("system",
-     "Answer ONLY using the CONTEXT below.\n\n{context}\n\n"
-     "Rules:\n"
-     "- Use only the provided context\n"
-     "- If the answer is not in context, say you don't know based on the uploaded PDF"),
+     "Answer ONLY from the context.\n\n{context}\n\n"
+     "If not found, say: 'I don't know based on the PDF'."),
     MessagesPlaceholder("chat_history"),
     ("human", "{input}")
 ])
 
 # =========================
-# Runnables / manual RAG
-# =========================
-from langchain_core.runnables import RunnableLambda
-from langchain_core.documents import Document
-
-def docs_to_context(docs: List[Document]) -> str:
-    return "\n\n".join(d.page_content for d in docs)
-
-def qa_with_context(inputs: dict) -> str:
-    context = docs_to_context(inputs["context"])
-    messages = qa_prompt.format_messages(
-        context=context,
-        chat_history=inputs.get("chat_history", []),
-        input=inputs["input"],
-    )
-    res = llm.invoke(messages)
-    return res.content if hasattr(res, "content") else str(res)
-
-qa_chain = RunnableLambda(qa_with_context)
-
-# =========================
-# Chat memory
+# Memory
 # =========================
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.runnables import RunnableLambda
 
 store = {}
 
@@ -157,7 +133,7 @@ def get_session_history(session_id):
     return store[session_id]
 
 # =========================
-# Streamlit session state
+# Session State
 # =========================
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
@@ -165,124 +141,65 @@ if "session_id" not in st.session_state:
 if "rag_chain" not in st.session_state:
     st.session_state.rag_chain = None
 
-if "collection_name" not in st.session_state:
-    st.session_state.collection_name = None
-
-if "pdf_path" not in st.session_state:
-    st.session_state.pdf_path = None
-
 if "chat_log" not in st.session_state:
     st.session_state.chat_log = []
 
 # =========================
-# Auto cleanup on app close
-# =========================
-def cleanup():
-    if st.session_state.pdf_path and os.path.exists(st.session_state.pdf_path):
-        try:
-            os.remove(st.session_state.pdf_path)
-        except:
-            pass
-
-    if st.session_state.collection_name:
-        try:
-            chroma.delete_collection(st.session_state.collection_name)
-        except:
-            pass
-
-atexit.register(cleanup)
-
-# =========================
-# Sidebar
-# =========================
-with st.sidebar:
-    st.subheader("Session controls")
-
-    if st.session_state.chat_log:
-        buffer = io.StringIO()
-        writer = csv.DictWriter(buffer, fieldnames=["question", "answer"])
-        writer.writeheader()
-        writer.writerows(st.session_state.chat_log)
-
-        st.download_button(
-            "⬇️ Download chat (CSV)",
-            buffer.getvalue(),
-            "chat_history.csv",
-            "text/csv",
-        )
-
-    if st.button("🗑️ Delete current PDF"):
-        store.pop(st.session_state.session_id, None)
-        st.session_state.chat_log.clear()
-
-        if st.session_state.collection_name:
-            chroma.delete_collection(st.session_state.collection_name)
-
-        if st.session_state.pdf_path and os.path.exists(st.session_state.pdf_path):
-            os.remove(st.session_state.pdf_path)
-
-        st.session_state.rag_chain = None
-        st.session_state.collection_name = None
-        st.session_state.pdf_path = None
-
-        st.success("PDF & chat cleared")
-
-# =========================
 # Upload PDF
 # =========================
-uploaded = st.file_uploader("📤 Upload a PDF", type=["pdf"])
+uploaded = st.file_uploader("📤 Upload PDF", type=["pdf"])
 
 if uploaded and not st.session_state.rag_chain:
     with st.spinner("Processing PDF..."):
-        name = sanitize(uploaded.name)
-        path = f"temp_{name}.pdf"
+        path = f"temp_{sanitize(uploaded.name)}.pdf"
 
         with open(path, "wb") as f:
             f.write(uploaded.read())
-
-        st.session_state.pdf_path = path
-        st.session_state.collection_name = name
 
         loader = PyPDFLoader(path)
         docs = loader.load()
 
         splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1500,
-            chunk_overlap=150
+            chunk_size=1000,
+            chunk_overlap=100
         )
         splits = splitter.split_documents(docs)
 
         vectorstore = Chroma.from_documents(
-            documents=splits,
+            splits,
             embedding=embedding,
-            collection_name=name,
+            collection_name=sanitize(uploaded.name),
             client=chroma
         )
 
-        # -------- Manual RAG chain (simple lambda) --------
+        # =========================
+        # RAG FUNCTION
+        # =========================
+        def rag_fn(inputs):
+            try:
+                query = inputs["input"]
 
-        def rag_fn(inputs: dict) -> str:
-            # 1) Contextualize question
-            messages = contextualize_q_prompt.format_messages(
-                chat_history=inputs.get("chat_history", []),
-                input=inputs["input"],
-            )
-            result = llm.invoke(messages)
-            standalone = result.content if hasattr(result, "content") else str(result)
+                # Retrieve docs
+                retriever = vectorstore.as_retriever(k=4)
+                docs = retriever.invoke(query)
 
-            # 2) Retrieve docs using retriever.invoke
-            retriever = vectorstore.as_retriever(k=4)
-            docs = retriever.invoke(standalone)
+                if not docs:
+                    return "No relevant info found in PDF."
 
-            # 3) Build context and answer
-            context = "\n\n".join(d.page_content for d in docs)
-            qa_messages = qa_prompt.format_messages(
-                context=context,
-                chat_history=inputs.get("chat_history", []),
-                input=standalone,
-            )
-            qa_res = llm.invoke(qa_messages)
-            return qa_res.content if hasattr(qa_res, "content") else str(qa_res)
+                context = "\n\n".join(d.page_content for d in docs)
+
+                messages = qa_prompt.format_messages(
+                    context=context,
+                    chat_history=inputs.get("chat_history", []),
+                    input=query
+                )
+
+                response = llm.invoke(messages)
+
+                return response.content if hasattr(response, "content") else str(response)
+
+            except Exception as e:
+                return f"⚠️ Error: {str(e)}"
 
         rag_chain = RunnableLambda(rag_fn)
 
@@ -291,16 +208,15 @@ if uploaded and not st.session_state.rag_chain:
             get_session_history,
             input_messages_key="input",
             history_messages_key="chat_history",
-            output_messages_key="answer",
         )
 
-    st.success("✅ PDF processed. Start chatting!")
+    st.success("✅ PDF ready!")
 
 # =========================
 # Chat UI
 # =========================
 if st.session_state.rag_chain:
-    user_input = st.chat_input("Ask a question about the PDF")
+    user_input = st.chat_input("Ask something...")
 
     if user_input:
         with st.chat_message("user"):
@@ -309,10 +225,10 @@ if st.session_state.rag_chain:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
                 answer = st.session_state.rag_chain.invoke(
-                {"input": user_input},
-                config={"configurable": {
-                    "session_id": st.session_state.session_id
-                }}
+                    {"input": user_input},
+                    config={"configurable": {
+                        "session_id": st.session_state.session_id
+                    }}
                 )
 
             st.write(answer)
@@ -323,4 +239,4 @@ if st.session_state.rag_chain:
             })
 
 else:
-    st.info("⬆️ Upload a PDF to begin")
+    st.info("⬆️ Upload a PDF to start")
